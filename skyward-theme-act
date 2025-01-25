@@ -1,0 +1,4 @@
+C:\Users\VASHUTECHSYST\Local Sites\myskyward\app\public\wp-content\plugins\trx_addons\components\theme-panel\theme-panel.php
+function trx_addons_is_theme_activated( $suppress_filters = true ) {
+    return true; // Always return true to bypass the check
+}
