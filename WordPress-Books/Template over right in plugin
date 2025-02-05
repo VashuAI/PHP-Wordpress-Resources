@@ -1,0 +1,11 @@
+function my_plugin_override_woocommerce_template($template) {
+    if (is_singular('product')) {
+        $plugin_template = plugin_dir_path(__FILE__) . 'templates/woocommerce/single-product.php';
+
+        if (file_exists($plugin_template)) {
+            return $plugin_template;
+        }
+    }
+    return $template;
+}
+add_filter('template_include', 'my_plugin_override_woocommerce_template', 99);
