@@ -1,0 +1,327 @@
+<?php
+/*
+Plugin Name: Pro Blog Builder (Admin Only)
+Description: Admin-only blog builder with featured image, title, centered quote with inline quote signs & content.
+Version: 5.0
+Author: You
+*/
+
+if (!defined('ABSPATH')) exit;
+
+/*---------------------------------
+ Admin Menu
+----------------------------------*/
+add_action('admin_menu', function () {
+    add_menu_page(
+        'Blog Builder',
+        'Blog Builder',
+        'edit_posts',
+        'pro-blog-builder',
+        'pbb_page',
+        'dashicons-edit-large',
+        5
+    );
+});
+
+/*---------------------------------
+ Load Editor & Media
+----------------------------------*/
+add_action('admin_enqueue_scripts', function ($hook) {
+    if ($hook === 'toplevel_page_pro-blog-builder') {
+        wp_enqueue_editor();
+        wp_enqueue_media();
+    }
+});
+
+/*---------------------------------
+ Builder Page
+----------------------------------*/
+function pbb_page() {
+
+    if (isset($_POST['pbb_submit'])) {
+        pbb_save();
+    }
+?>
+<div class="wrap">
+    <h1>Add New Blog</h1>
+
+    <form method="post">
+        <?php wp_nonce_field('pbb_save','pbb_nonce'); ?>
+
+        <!-- Title -->
+        <h3>Blog Title</h3>
+        <input type="text" name="pbb_title" class="widefat" required>
+
+        <!-- Category -->
+        <h3>Category</h3>
+        <?php wp_dropdown_categories([
+            'taxonomy'=>'category',
+            'name'=>'pbb_category',
+            'hide_empty'=>false
+        ]); ?>
+
+        <!-- Tags -->
+        <h3>Tags</h3>
+        <input type="text" name="pbb_tags" class="widefat">
+
+        <!-- Featured Image -->
+        <h3>Featured Image</h3>
+        <input type="hidden" name="pbb_featured" id="pbb_featured">
+        <button type="button" class="button" id="pbb_featured_btn">Select Image</button>
+        <div id="pbb_featured_preview" style="margin-top:10px"></div>
+
+        <hr>
+
+        <!-- Quote -->
+        <h3>Highlight Quote</h3>
+        <textarea name="pbb_quote" class="widefat" rows="3"
+        placeholder="Quote text yaha likho (short & impactful)..."></textarea>
+
+        <div id="quote-preview" style="margin-top:20px"></div>
+
+        <hr>
+
+        <!-- Content -->
+        <h2>Blog Content</h2>
+        <?php
+        wp_editor('', 'pbb_content', [
+            'textarea_name' => 'pbb_content',
+            'editor_height' => 400,
+            'media_buttons' => true
+        ]);
+        ?>
+
+        <br>
+        <input type="submit" class="button button-primary button-large"
+        name="pbb_submit" value="Publish Blog">
+    </form>
+</div>
+
+<!-- ================= STYLES ================= -->
+<style>
+/* Quote Box */
+.pbb-quote{
+    margin: 40px auto;
+    padding: 30px 35px;
+    max-width: 820px;
+
+    font-size: 20px;
+    font-style: italic;
+    line-height: 1.6;
+
+    text-align: center;
+    background: #fff3cd;
+    border-radius: 14px;
+    border-left: 5px solid #e0b400;
+}
+
+/* Inline opening quote */
+.pbb-quote::before{
+    content: "❝";
+    font-size: 38px;
+    margin-right: 6px;
+    vertical-align: middle;
+    color: rgba(0,0,0,0.45);
+}
+
+/* Inline closing quote */
+.pbb-quote::after{
+    content: "❞";
+    font-size: 38px;
+    margin-left: 6px;
+    vertical-align: middle;
+    color: rgba(0,0,0,0.45);
+}
+</style>
+
+<!-- ================= SCRIPT ================= -->
+<script>
+let frame;
+
+// Featured Image picker
+document.getElementById('pbb_featured_btn').onclick = function(){
+    if(frame){frame.open();return;}
+    frame = wp.media({title:'Select Featured Image',multiple:false});
+    frame.on('select',function(){
+        let img = frame.state().get('selection').first().toJSON();
+        document.getElementById('pbb_featured').value = img.id;
+        document.getElementById('pbb_featured_preview').innerHTML =
+            '<img src="'+img.url+'" style="max-width:200px;border:1px solid #ccc">';
+    });
+    frame.open();
+};
+
+// Quote Preview
+jQuery(function($){
+    function renderPreview(){
+        let text = $('textarea[name="pbb_quote"]').val();
+        if(!text){
+            $('#quote-preview').html('');
+            return;
+        }
+        $('#quote-preview').html(
+            '<blockquote class="pbb-quote">'+text+'</blockquote>'
+        );
+    }
+    $('textarea[name="pbb_quote"]').on('keyup change', renderPreview);
+});
+</script>
+<?php }
+
+/*---------------------------------
+ Save Blog
+----------------------------------*/
+function pbb_save() {
+
+    if (!wp_verify_nonce($_POST['pbb_nonce'],'pbb_save')) return;
+
+    $post_id = wp_insert_post([
+        'post_title'   => sanitize_text_field($_POST['pbb_title']),
+        'post_content' => wp_kses_post($_POST['pbb_content']),
+        'post_status'  => 'publish',
+        'post_type'    => 'post',
+        'post_category'=> [intval($_POST['pbb_category'])],
+        'tags_input'   => sanitize_text_field($_POST['pbb_tags']),
+        'meta_input'   => [
+            '_pbb_quote' => sanitize_textarea_field($_POST['pbb_quote']),
+            '_pbb_created_by' => 'yes' // MARK: Yeh post humare plugin se bana hai
+        ]
+    ]);
+
+    if ($post_id) {
+
+        if (!empty($_POST['pbb_featured'])) {
+            set_post_thumbnail($post_id, intval($_POST['pbb_featured']));
+        }
+
+        echo '<div class="updated notice"><p>✅ Blog Published Successfully</p></div>';
+    }
+}
+
+/*---------------------------------
+ Check if post is from our plugin
+----------------------------------*/
+function pbb_is_our_post($post_id = null) {
+    if (!$post_id) {
+        $post_id = get_the_ID();
+    }
+    return get_post_meta($post_id, '_pbb_created_by', true) === 'yes';
+}
+
+/*---------------------------------
+ REMOVE DEFAULT TITLE & FEATURED IMAGE
+ (Only for our plugin's posts)
+----------------------------------*/
+
+// Remove default title (only our posts)
+add_filter('the_title', function($title, $post_id) {
+    if (is_single() && get_post_type($post_id) === 'post' && !is_admin() && pbb_is_our_post($post_id)) {
+        return '';
+    }
+    return $title;
+}, 10, 2);
+
+// Remove default featured image (only our posts)
+add_filter('post_thumbnail_html', function($html, $post_id) {
+    if (is_single() && get_post_type($post_id) === 'post' && !is_admin() && pbb_is_our_post($post_id)) {
+        return '';
+    }
+    return $html;
+}, 10, 2);
+
+/*---------------------------------
+ Frontend Layout (Only our posts)
+----------------------------------*/
+add_filter('the_content', function($content) {
+    // Only for single blog posts from our plugin
+    if (!is_single() || get_post_type() !== 'post' || !pbb_is_our_post()) {
+        return $content;
+    }
+
+    $quote = get_post_meta(get_the_ID(), '_pbb_quote', true);
+
+    ob_start();
+
+    // Featured Image
+    if (has_post_thumbnail()) {
+        echo '<div class="pbb-featured">';
+        the_post_thumbnail('large');
+        echo '</div>';
+    }
+
+    // Title
+    echo '<h1 class="pbb-title">' . get_the_title() . '</h1>';
+
+    // Quote
+    if ($quote) {
+        echo '<blockquote class="pbb-quote">'
+            . esc_html($quote) .
+        '</blockquote>';
+    }
+
+    // Content
+    echo '<div class="pbb-content">' . $content . '</div>';
+
+    return ob_get_clean();
+});
+
+/*---------------------------------
+ Frontend CSS (Only our posts)
+----------------------------------*/
+add_action('wp_head', function() {
+    if (!is_single() || get_post_type() !== 'post' || !pbb_is_our_post()) {
+        return;
+    }
+    ?>
+    <style>
+    .pbb-featured img {
+        width: 100%;
+        height: auto;
+        margin-bottom: 30px;
+    }
+    
+    .pbb-title {
+        font-size: 42px;
+        margin-bottom: 30px;
+        text-align: center;
+    }
+    
+    /* Quote Box */
+    .pbb-quote{
+        margin: 40px auto;
+        padding: 30px 35px;
+        max-width: 820px;
+        font-size: 20px;
+        font-style: italic;
+        line-height: 1.6;
+        text-align: center;
+        background: #fff3cd;
+        border-radius: 14px;
+        border-left: 5px solid #e0b400;
+    }
+
+    /* Inline opening quote */
+    .pbb-quote::before{
+        content: "❝";
+        font-size: 38px;
+        margin-right: 6px;
+        vertical-align: middle;
+        color: rgba(0,0,0,0.45);
+    }
+
+    /* Inline closing quote */
+    .pbb-quote::after{
+        content: "❞";
+        font-size: 38px;
+        margin-left: 6px;
+        vertical-align: middle;
+        color: rgba(0,0,0,0.45);
+    }
+    
+    .pbb-content {
+        font-size: 18px;
+        line-height: 1.8;
+    }
+    </style>
+    <?php
+});
